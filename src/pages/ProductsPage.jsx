@@ -5,7 +5,7 @@ import { ProductCard } from "../components/Productpage/ProductCard";
 import CustomSelect from "../components/Productpage/CustomSelect";
 import SortSelect from "../components/Productpage/SortSelect";
 
-export function ProductsPage({ products = [] , onAddToCart, onViewDetails }) {
+export function ProductsPage({ products = [], loadingProducts, handleAddToCart, onViewDetails }) {
   const [viewMode, setViewMode] = useState("grid");
   const [sortBy, setSortBy] = useState("featured");
   const [selectedCategories, setSelectedCategories] = useState([]);
@@ -36,6 +36,15 @@ export function ProductsPage({ products = [] , onAddToCart, onViewDetails }) {
   });
 
 
+  if (loadingProducts) {
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="loader ease-linear rounded-full border-8 border-t-8 border-gray-200 h-32 w-32">
+        Loading products...
+      </div>
+    </div>
+  );
+}
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -144,13 +153,13 @@ export function ProductsPage({ products = [] , onAddToCart, onViewDetails }) {
           ) : viewMode === "grid" ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {sortedProducts.map((product) => (
-                <ProductCard key={product.id} product={product} onAddToCart={() => onAddToCart(product)} onViewDetails={() => onViewDetails(product)} />
+                <ProductCard key={product.id} product={product} handleAddToCart={() => handleAddToCart(product)} onViewDetails={() => onViewDetails(product)} />
               ))}
             </div>
           ) : (
             <div className="flex flex-col space-y-4">
               {sortedProducts.map((product) => (
-                <ProductCard key={product.id} product={product} onAddToCart={() => onAddToCart(product)} onViewDetails={() => onViewDetails(product)} />
+                <ProductCard key={product.id} product={product} handleAddToCart={() => handleAddToCart(product)} onViewDetails={() => onViewDetails(product)} />
               ))}
             </div>
           )}
