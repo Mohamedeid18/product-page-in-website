@@ -1,6 +1,6 @@
 import { FaRegHeart, FaShoppingCart, FaStar } from "react-icons/fa";
 import { VscPreview } from "react-icons/vsc";
-export function ProductCard({ product, handleAddToCart, onViewDetails }) {
+export function ProductCard({ product, handleAddToCart, onViewDetails}) {
   const discountPercentage = product.originalPrice
     ? Math.round(
         ((product.originalPrice - product.price) / product.originalPrice) * 100

@@ -4,16 +4,36 @@ import { MdViewModule } from "react-icons/md";
 import { ProductCard } from "../components/Productpage/ProductCard";
 import CustomSelect from "../components/Productpage/CustomSelect";
 import SortSelect from "../components/Productpage/SortSelect";
-
-export function ProductsPage({ products = [], loadingProducts, handleAddToCart, onViewDetails }) {
+import { useLocation } from "react-router-dom";
+import { useEffect } from "react";
+import Detials from "../components/Productpage/Detials";
+export function ProductsPage({ products = [], loadingProducts, handleAddToCart, onViewDetails ,onCloseDetails, selectedProduct} ) {
+  const location = useLocation();
+  //read search query from URL
+  const queryParams = new URLSearchParams(location.search);
+  const searchTerm = queryParams.get("search")?.toLowerCase() || "";
+  const [searchFiltered, setSearchFiltered] = useState(products);
+  //filter products based on search term
+  useEffect(() => {
+    if (!searchTerm) {
+      setSearchFiltered(products);
+      return;
+    }
+    const filtered = products.filter((product) =>
+      product.name.toLowerCase().includes(searchTerm) ||
+      product.description.toLowerCase().includes(searchTerm) ||
+      product.category.toLowerCase().includes(searchTerm)
+    );
+    setSearchFiltered(filtered);
+  }, [searchTerm, products]);
   const [viewMode, setViewMode] = useState("grid");
   const [sortBy, setSortBy] = useState("featured");
   const [selectedCategories, setSelectedCategories] = useState([]);
   const [priceRange, setPriceRange] = useState("all");
 
-  const categories = [...new Set(products.map((p) => p.category))];
+  const categories = [...new Set(searchFiltered.map((p) => p.category))];
 
-  const filteredProducts = products.filter((product) => {
+  const filteredProducts = searchFiltered.filter((product) => {
     if (selectedCategories.length && !selectedCategories.includes(product.category)) {
       return false;
     }
@@ -48,6 +68,8 @@ export function ProductsPage({ products = [], loadingProducts, handleAddToCart, 
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Product Details Modal */}
+      <Detials selectedProduct={selectedProduct} onCloseDetails={onCloseDetails} handleAddToCart={handleAddToCart} />
       {/* Header */}
       <div className="bg-white border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -153,13 +175,13 @@ export function ProductsPage({ products = [], loadingProducts, handleAddToCart, 
           ) : viewMode === "grid" ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {sortedProducts.map((product) => (
-                <ProductCard key={product.id} product={product} handleAddToCart={() => handleAddToCart(product)} onViewDetails={() => onViewDetails(product)} />
+                <ProductCard key={product.id} product={product} handleAddToCart={() => handleAddToCart(product)} onViewDetails={onViewDetails} />
               ))}
             </div>
           ) : (
             <div className="flex flex-col space-y-4">
               {sortedProducts.map((product) => (
-                <ProductCard key={product.id} product={product} handleAddToCart={() => handleAddToCart(product)} onViewDetails={() => onViewDetails(product)} />
+                <ProductCard key={product.id} product={product} handleAddToCart={() => handleAddToCart(product)} onViewDetails={onViewDetails} />
               ))}
             </div>
           )}

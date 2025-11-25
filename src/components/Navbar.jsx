@@ -1,5 +1,5 @@
 import React, { useState, useContext } from "react";
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import EcoMarketLogo from "../assets/EcoMarketLogo.svg";
 import {
   IoSearchOutline,
@@ -16,6 +16,9 @@ import {
   Button,
   Avatar,
   Typography,
+  Dialog,
+  DialogBody,
+  Input
 } from "@material-tailwind/react";
 
 // Profile menu component
@@ -103,6 +106,19 @@ const Navbar = ({ cartCount, onCartClick }) => {
     setAuth({ isLoggedIn: false, role: "", userName: "" });
     navigate("/login");
   };
+  // Search Popup State & Logic
+const [openSearch, setOpenSearch] = useState(false);
+const [searchValue, setSearchValue] = useState("");
+const location = useLocation();
+
+const handleSearch = (e) => {
+  e.preventDefault();
+
+  if (location.pathname !== "/products") return;
+
+  navigate(`/products?search=${searchValue}`);
+  setOpenSearch(false);
+};
 
   return (
     <header className="bg-white text-gray-800 shadow-md sticky top-0 z-50">
@@ -117,7 +133,6 @@ const Navbar = ({ cartCount, onCartClick }) => {
           <nav className="hidden lg:flex gap-7 text-gray-800 font-semibold text-md transition-colors duration-300 justify-center  flex-1">
             <NavLink to="/" className={navLinkClass}>Home</NavLink>
             <NavLink to="/products" className={navLinkClass}>Products</NavLink>
-            <NavLink to="/details" className={navLinkClass}>Categories</NavLink>
             <NavLink to="/about" className={navLinkClass}>About</NavLink>
             <NavLink to="/contact" className={navLinkClass}>Contact</NavLink>
 
@@ -129,7 +144,13 @@ const Navbar = ({ cartCount, onCartClick }) => {
           {/* Right Icons / Auth */}
           <div className="flex items-center gap-5">
               <div className="p-2 rounded-md hover:bg-gray-300/30 transition-colors duration-200 cursor-pointer">
-                <IoSearchOutline className="w-5 h-5 text-gray-700" />
+                {/* Search Icon */}
+                <div
+                  className="p-2 rounded-md hover:bg-gray-300/30 transition-colors duration-200 cursor-pointer"
+                  onClick={() => setOpenSearch(true)}
+                >
+                  <IoSearchOutline className="w-5 h-5 text-gray-700" />
+                </div>
               </div>
               <div className="relative p-2 rounded-md hover:bg-gray-300/30 transition-colors duration-200 cursor-pointer"
                   onClick={onCartClick}
@@ -172,7 +193,6 @@ const Navbar = ({ cartCount, onCartClick }) => {
           <nav className="lg:hidden  flex flex-col gap-4 px-6 py-4 text-gray-800 font-semibold text-lg ">
             <Link to="/" onClick={() => setIsOpen(false)} className="hover:text-green-400 transition-colors duration-200">Home</Link>
             <Link to="/products" onClick={() => setIsOpen(false)} className="hover:text-green-400 transition-colors duration-200">Products</Link>
-            <Link to="/details" onClick={() => setIsOpen(false)} className="hover:text-green-400 transition-colors duration-200">Categories</Link>
             <Link to="/about" onClick={() => setIsOpen(false)} className="hover:text-green-400 transition-colors duration-200">About</Link>
             <Link to="/contact" onClick={() => setIsOpen(false)} className="hover:text-green-400 transition-colors duration-200">Contact</Link>
             {isLoggedIn && role === "admin" && (
@@ -181,6 +201,63 @@ const Navbar = ({ cartCount, onCartClick }) => {
           </nav>
         )}
       </div>
+      {/* Search Dialog */}
+          <Dialog open={openSearch} handler={setOpenSearch} size="md" className="p-4">
+      <DialogBody className="space-y-5">
+
+        {/* Title */}
+        <h2 className="text-2xl font-semibold text-gray-800 text-center">
+          Search Products
+        </h2>
+
+        {/* Search Form */}
+        <form onSubmit={handleSearch} className="flex gap-3">
+          <Input
+            label="Search for eco-friendly products..."
+            value={searchValue}
+            onChange={(e) => setSearchValue(e.target.value)}
+            autoFocus
+            className="flex-1"
+          />
+
+          <Button
+            type="submit"
+            color={location.pathname === "/products" ? "green" : "gray"}
+            disabled={location.pathname !== "/products"}
+          >
+            Search
+          </Button>
+        </form>
+
+        {/* Not allowed message */}
+        {location.pathname !== "/products" && (
+          <p className="text-red-500 text-sm text-center">
+            Searching is only available on the Products page.
+          </p>
+        )}
+
+        {/* Popular Searches */}
+        <div>
+          <p className="text-gray-700 mb-3 font-medium">Popular searches:</p>
+
+          <div className="flex flex-wrap gap-3">
+            {["Bamboo", "Organic", "Zero Waste"].map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => {
+                      setSearchValue(item);
+                    }}
+                    className="px-3 py-1 bg-green-50 text-green-700 rounded-full hover:bg-green-100 transition-colors"
+                  >
+                    {item}
+                  </button>
+                ))}
+          </div>
+        </div>
+      </DialogBody>
+    </Dialog>
+
     </header>
   );
 };

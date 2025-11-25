@@ -1,7 +1,6 @@
 import { Route, Routes, Navigate } from "react-router-dom";
 import HomePage from "./pages/HomePage";
 import ProductsPage from "./pages/ProductsPage";
-import DetailsProductsPage from "./pages/DetailsProductsPage";
 import AboutPage from "./pages/AboutPage";
 import ContactPage from "./pages/ContactPage";
 import LoginPage from "./pages/LoginPage";
@@ -15,11 +14,13 @@ import Footer from "./components/Footer";
 import Cart from "./components/Cart";
 import { createContext, useState, useEffect } from "react";
 import axios from "axios";
-
+import { Alert } from "@material-tailwind/react";
 export const AuthContext = createContext();
 
 const App = () => {
-  // --- Load stored user safely ---
+  // Alert state
+  const [alertMessage, setAlertMessage] = useState("");
+  //  Load stored user safely 
   const storedUser = (() => {
     try {
       const raw = localStorage.getItem("user");
@@ -73,16 +74,18 @@ const App = () => {
 
     fetchProducts();
   }, []);
-
+  // save selected product for details view
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  // View Details handler
   const onViewDetails = (product) => {
-    alert(`Viewing details for ${product.name}`);
+    setSelectedProduct(product);
   };
+  const onCloseDetails = () => {
+    setSelectedProduct(null);
+  }
 
   // Cart state
   const [isCartOpen, setIsCartOpen] = useState(false);
-  const getCartStorageKey = () => {
-    return auth.isLoggedIn ? `cartItems_${auth.userName}` : "cartItems_guest";
-  };
   const [cartItems, setCartItems] = useState(() => {
     try {
       const key = storedUser
@@ -182,7 +185,7 @@ const App = () => {
   //cart handlers
   const handleAddToCart = (product) => {
     if (!auth.isLoggedIn) {
-      alert("You must be logged in to add items to the cart.");
+      setAlertMessage("You must be logged in to add items to the cart.");
       return;
     }
     setCartItems((prevItems) => {
@@ -214,7 +217,13 @@ const App = () => {
     );
   };
   const cartCount = cartItems.reduce((total, item) => total + item.quantity, 0);
-
+  //hide alert after 2 seconds
+  useEffect(() => {
+    if (alertMessage) {
+      const timer = setTimeout(() => setAlertMessage(""), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [alertMessage]);
   return (
     <AuthContext.Provider value={{ ...auth, setAuth }}>
       <Navbar
@@ -222,7 +231,13 @@ const App = () => {
         onCartClick={() => setIsCartOpen(!isCartOpen)}
       />
       <Routes>
-        <Route path="/" element={<HomePage />} />
+        <Route path="/" element={<HomePage 
+              products={products}
+              loadingProducts={loadingProducts}
+              handleAddToCart={handleAddToCart}
+              onViewDetails={onViewDetails}
+              onCloseDetails={onCloseDetails}
+              selectedProduct={selectedProduct} /> } />
         <Route
           path="/products"
           element={
@@ -231,10 +246,11 @@ const App = () => {
               loadingProducts={loadingProducts}
               handleAddToCart={handleAddToCart}
               onViewDetails={onViewDetails}
+              onCloseDetails={onCloseDetails}
+              selectedProduct={selectedProduct}
             />
           }
         />
-        <Route path="/details" element={<DetailsProductsPage />} />
         <Route path="/about" element={<AboutPage />} />
         <Route path="/contact" element={<ContactPage />} />
 
@@ -270,6 +286,15 @@ const App = () => {
         onRemoveItem={removeFromCart}
         setCartItems={setCartItems}
       />
+      {/* show message if alertMessage */}
+      {alertMessage && (
+        <div className="fixed  right-2 top-20 z-50">
+          <Alert color="red" onClose={() => setAlertMessage("")}>
+            {alertMessage}
+          </Alert>
+        </div>
+      )}
+
     </AuthContext.Provider>
   );
 };
