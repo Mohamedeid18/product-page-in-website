@@ -1,5 +1,5 @@
 import AboutHero from "../components/about/AboutHero";
-import CTA from "../components/about/cta";
+import CTA from "../components/about/CTA";
 import Mission from "../components/about/Mission";
 import Values from "../components/about/Values";
 
