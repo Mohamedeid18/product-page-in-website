@@ -87,7 +87,7 @@ const SignUpPage = () => {
     }
   };
  return (
-    <div className='flex justify-center items-center'>
+    <div className='flex justify-center items-center bg-gray-100 pt-4'>
       <section className='my-6 p-8 rounded-lg shadow-lg bg-white'>
        <Card color="transparent" shadow={false}>
         <Typography variant="h4" color="blue-gray">

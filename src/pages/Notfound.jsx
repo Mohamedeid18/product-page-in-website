@@ -1,7 +1,7 @@
 import React from "react";
 import { Typography, Button } from "@material-tailwind/react";
 import { FaFlag } from "react-icons/fa6";
-
+import { Link } from "react-router-dom";
 const Notfound = () => {
   return (
     <div className="h-screen mx-auto grid place-items-center text-center px-8">
@@ -19,7 +19,7 @@ const Notfound = () => {
             the page or come back later.
           </Typography>
           <Button color="gray" className="w-full px-4 md:w-[8rem]">
-            back home
+            <Link to="/">Go Back Home</Link>
           </Button>
         </div>
       </div>

@@ -11,6 +11,7 @@ import Dashboard from "./pages/dashboard/Dashboard";
 import Users from "./pages/dashboard/Users";
 import Orders from "./pages/dashboard/Orders";
 import Notfound from "./pages/Notfound";
+import Footer from "./components/Footer";
 import { createContext, useState, useEffect } from "react";
 import axios from "axios";
 
@@ -107,6 +108,7 @@ const App = () => {
 
         <Route path="*" element={<Notfound />} />
       </Routes>
+      <Footer />
     </AuthContext.Provider>
   );
 };

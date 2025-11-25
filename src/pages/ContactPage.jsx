@@ -2,7 +2,9 @@
 
 const ContactPage = () => {
   return (
-    <div>ContactPage</div>
+    <div className="h-screen flex justify-center items-center">
+      <button>ContactPage</button>
+    </div>
   )
 }
 

@@ -64,8 +64,8 @@ const LoginPage = () => {
   }
 
   return (
-    <div className='flex justify-center items-center'>
-      <section className="my-6 p-8 w-[450px] rounded-lg shadow-lg text-center bg-white">
+    <div className='flex justify-center items-center bg-gray-100'>
+      <section className="my-16  p-8 w-[450px] rounded-lg shadow-lg text-center bg-white">
         <Typography variant="h3" color="blue-gray" className="mb-2">Sign In</Typography>
         <Typography className="mb-16 text-gray-600 font-normal text-[18px]">
           Enter your email and password to sign in

@@ -2,7 +2,7 @@
 
 const HomePage = () => {
   return (
-    <div>
+    <div className="h-screen flex items-center justify-center text-3xl font-bold">
        Home
     </div>
   )
