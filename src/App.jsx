@@ -11,21 +11,33 @@ import Overview from "./pages/dashboard/Overview";
 import Users from "./pages/dashboard/Users";
 import Products from "./pages/dashboard/Products";
 import Orders from "./pages/dashboard/Orders";
-import OrderedItems from "./pages/dashboard/OrderedItems";
-import Carts from "./pages/dashboard/Carts";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Notfound from "./pages/Notfound";
 import Footer from "./components/Footer";
 import Cart from "./components/Cart";
+import OrdersPage from "./pages/OrdersPage";
 import { createContext, useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { Alert } from "@material-tailwind/react";
 import { API_URLS } from "./api/config";
 export const AuthContext = createContext();
 
+// Set axios Authorization header synchronously at module load if token exists.
+// This ensures requests fired during initial render/effects include the token.
+try {
+  const _token = localStorage.getItem("token");
+  if (_token) {
+    axios.defaults.headers.common["Authorization"] = `Bearer ${_token}`;
+  }
+} catch (err) {
+  // ignore (localStorage may be unavailable during some environments)
+}
+
 const App = () => {
   // Alert state
   const [alertMessage, setAlertMessage] = useState("");
-  //  Load stored user safely 
+  //  Load stored user safely
   const storedUser = (() => {
     try {
       const raw = localStorage.getItem("user");
@@ -54,7 +66,60 @@ const App = () => {
         userName: user.userName || "",
       });
     }
+    // If token exists, set axios default Authorization header
+    try {
+      const token = localStorage.getItem("token");
+      if (token) {
+        axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+      }
+    } catch (err) {
+      console.error("Error setting axios auth header from localStorage", err);
+    }
   }, []);
+
+  // Setup axios interceptors: attach token from localStorage on every request
+  // and handle 401 responses by clearing auth and redirecting to login.
+  const navigate = useNavigate();
+  useEffect(() => {
+    const reqInterceptor = axios.interceptors.request.use(
+      (config) => {
+        try {
+          const token = localStorage.getItem("token");
+          if (token) {
+            config.headers = config.headers || {};
+            config.headers.Authorization = `Bearer ${token}`;
+          }
+        } catch (err) {
+          console.error("Error attaching token to request:", err);
+        }
+        return config;
+      },
+      (error) => Promise.reject(error)
+    );
+
+    const resInterceptor = axios.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        try {
+          if (error.response && error.response.status === 401) {
+            // Clear stored auth and redirect to login
+            localStorage.removeItem("token");
+            localStorage.removeItem("user");
+            setAuth({ isLoggedIn: false, role: "", userName: "" });
+            navigate("/login");
+          }
+        } catch (err) {
+          console.error("Error handling 401:", err);
+        }
+        return Promise.reject(error);
+      }
+    );
+
+    return () => {
+      axios.interceptors.request.eject(reqInterceptor);
+      axios.interceptors.response.eject(resInterceptor);
+    };
+  }, [navigate]);
 
   // Products state and fetching
 
@@ -67,7 +132,11 @@ const App = () => {
         const res = await axios.get(API_URLS.PRODUCTS);
         const data = await res.data;
 
-        setProducts(data);
+        // Normalize response: backend may return an array or an object like { items: [...] } or { products: [...] }
+        const items = Array.isArray(data)
+          ? data
+          : data.products || data.items || data.data || [];
+        setProducts(items);
       } catch (error) {
         console.error("Error fetching products:", error);
       } finally {
@@ -85,7 +154,7 @@ const App = () => {
   };
   const onCloseDetails = () => {
     setSelectedProduct(null);
-  }
+  };
 
   // Cart state
   const [isCartOpen, setIsCartOpen] = useState(false);
@@ -191,21 +260,28 @@ const App = () => {
       setAlertMessage("You must be logged in to add items to the cart.");
       return;
     }
+    // Normalize product id on add to ensure consistency (backend may use _id)
+    const normId = product._id || product.id || product.productId;
+    const normalizedProduct = { ...product, id: normId };
     setCartItems((prevItems) => {
-      const itemExists = prevItems.find((item) => item.id === product.id);
+      const itemExists = prevItems.find(
+        (item) => (item.id || item._id || item.productId) === normId
+      );
       if (itemExists) {
         return prevItems.map((item) =>
-          item.id === product.id
+          (item.id || item._id || item.productId) === normId
             ? { ...item, quantity: item.quantity + 1 }
             : item
         );
       }
-      return [...prevItems, { ...product, quantity: 1 }];
+      return [...prevItems, { ...normalizedProduct, quantity: 1 }];
     });
   };
   const removeFromCart = (productId) => {
     setCartItems((prevItems) =>
-      prevItems.filter((item) => item.id !== productId)
+      prevItems.filter(
+        (item) => (item.id || item._id || item.productId) !== productId
+      )
     );
   };
   const updateQuantity = (productId, quantity) => {
@@ -215,7 +291,9 @@ const App = () => {
     }
     setCartItems((prevItems) =>
       prevItems.map((item) =>
-        item.id === productId ? { ...item, quantity } : item
+        (item.id || item._id || item.productId) === productId
+          ? { ...item, quantity }
+          : item
       )
     );
   };
@@ -234,13 +312,19 @@ const App = () => {
         onCartClick={() => setIsCartOpen(!isCartOpen)}
       />
       <Routes>
-        <Route path="/" element={<HomePage 
+        <Route
+          path="/"
+          element={
+            <HomePage
               products={products}
               loadingProducts={loadingProducts}
               handleAddToCart={handleAddToCart}
               onViewDetails={onViewDetails}
               onCloseDetails={onCloseDetails}
-              selectedProduct={selectedProduct} /> } />
+              selectedProduct={selectedProduct}
+            />
+          }
+        />
         <Route
           path="/products"
           element={
@@ -254,6 +338,7 @@ const App = () => {
             />
           }
         />
+        <Route path="/my-orders" element={<OrdersPage />} />
         <Route path="/about" element={<AboutPage />} />
         <Route path="/contact" element={<ContactPage />} />
 
@@ -268,7 +353,9 @@ const App = () => {
           path="/admin/dashboard/*"
           element={
             auth.isLoggedIn && auth.role === "admin" ? (
-              <Dashboard />
+              <ErrorBoundary>
+                <Dashboard />
+              </ErrorBoundary>
             ) : (
               <Navigate to="/" />
             )
@@ -278,8 +365,6 @@ const App = () => {
           <Route path="users" element={<Users />} />
           <Route path="products" element={<Products />} />
           <Route path="orders" element={<Orders />} />
-          <Route path="ordered-items" element={<OrderedItems />} />
-          <Route path="carts" element={<Carts />} />
         </Route>
 
         <Route path="*" element={<Notfound />} />
@@ -301,7 +386,6 @@ const App = () => {
           </Alert>
         </div>
       )}
-
     </AuthContext.Provider>
   );
 };

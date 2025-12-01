@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'
-import axios from 'axios';
+import React, { useState, useEffect } from "react";
+import axios from "axios";
 import { FaEye, FaTimes } from "react-icons/fa";
 import { API_URLS } from "../../api/config";
 
@@ -8,6 +8,7 @@ const Orders = () => {
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentOrder, setCurrentOrder] = useState(null);
+  const [orderNumber, setOrderNumber] = useState(1);
 
   const API_URL = API_URLS.ORDERS;
 
@@ -15,7 +16,12 @@ const Orders = () => {
     setLoading(true);
     try {
       const res = await axios.get(API_URL);
-      setOrders(res.data);
+      // Normalize response: backend returns { orders: [...] }
+      const data = res.data;
+      const ordersArray = Array.isArray(data)
+        ? data
+        : data.orders || data.items || data.data || [];
+      setOrders(ordersArray);
     } catch (error) {
       console.error("Error fetching orders:", error);
     } finally {
@@ -27,12 +33,13 @@ const Orders = () => {
     fetchOrders();
   }, []);
 
-  const handleView = (order) => {
+  const handleView = (order, index) => {
     setCurrentOrder(order);
+    setOrderNumber(index + 1);
     setIsModalOpen(true);
   };
 
-  const handleStatusChange = async (e) => {
+  const handleStatusChange = (e) => {
     const newStatus = e.target.value;
     const updatedOrder = { ...currentOrder, status: newStatus };
     setCurrentOrder(updatedOrder);
@@ -40,91 +47,203 @@ const Orders = () => {
 
   const handleSave = async () => {
     try {
-      if (currentOrder.status === "Delivered") {
-        // Reduce stock when order is delivered
-        if (window.confirm("Setting order to Delivered will reduce stock. Continue?")) {
-          // Check if this order was already delivered (to avoid reducing stock twice)
-          const originalOrder = orders.find(o => o.id === currentOrder.id);
-          if (originalOrder && originalOrder.status === "Delivered") {
-            alert("This order is already marked as Delivered");
+      const orderId = currentOrder._id || currentOrder.id;
+      const originalOrder = orders.find((o) => (o._id || o.id) === orderId);
+
+      if (currentOrder.status === "pending") {
+        // Reduce stock when order status is set to Pending
+        if (
+          window.confirm(
+            "Setting order to Pending will reduce stock. Continue?"
+          )
+        ) {
+          // If stock was already reserved server-side or the order was previously delivered,
+          // skip the manual client-side decrement and let the server-side status update handle it.
+          if (
+            originalOrder &&
+            (originalOrder.stockReserved ||
+              originalOrder.status === "delivered")
+          ) {
+            try {
+              await updateOrderStatus(orderId, { status: currentOrder.status });
+              setOrders(
+                orders.map((o) =>
+                  (o._id || o.id) === orderId
+                    ? { ...o, status: currentOrder.status }
+                    : o
+                )
+              );
+              setIsModalOpen(false);
+              alert(
+                "Order set to Pending (server-side reservation already present)"
+              );
+            } catch (err) {
+              console.error("Error updating order status:", err);
+              alert(
+                "Failed to update order: " +
+                  (err.response?.data?.message || err.message)
+              );
+            }
+            return;
+          }
+
+          // Check if stock was already reduced
+          if (originalOrder && originalOrder.status === "pending") {
+            alert("This order is already Pending. Stock already reduced.");
             return;
           }
 
           // Reduce stock for each item in the order
-          const stockUpdatePromises = currentOrder.items?.map(async (item) => {
-            try {
-              const productResponse = await axios.get(`${API_URLS.PRODUCTS}/${item.id}`);
-              const currentProduct = productResponse.data;
-              const newStock = Math.max(0, (currentProduct.stock || 0) - item.quantity);
-              
-              await axios.put(`${API_URLS.PRODUCTS}/${item.id}`, {
-                ...currentProduct,
-                stock: newStock
-              });
-            } catch (error) {
-              console.error(`Error reducing stock for product ${item.id}:`, error);
-            }
-          }) || [];
-
-          await Promise.all(stockUpdatePromises);
-          
-          // Update order status
-          await axios.put(`${API_URL}/${currentOrder.id}`, currentOrder);
-          setOrders(orders.map(o => o.id === currentOrder.id ? currentOrder : o));
-          setIsModalOpen(false);
-          alert("Order marked as Delivered and stock reduced successfully");
-        }
-      } else if (currentOrder.status === "Cancelled") {
-        // Check if order was delivered before cancelling
-        const originalOrder = orders.find(o => o.id === currentOrder.id);
-        const wasDelivered = originalOrder && originalOrder.status === "Delivered";
-        
-        const confirmMessage = wasDelivered 
-          ? "This order was Delivered. Cancelling will restore stock and delete the order. Continue?"
-          : "Cancelling this order will delete it. Continue?";
-          
-        if (window.confirm(confirmMessage)) {
-          // Restore stock only if order was delivered
-          if (wasDelivered) {
-            const stockRestorePromises = currentOrder.items?.map(async (item) => {
+          const stockUpdatePromises =
+            (getOrderItems(currentOrder) || []).map(async (item) => {
               try {
-                const productResponse = await axios.get(`${API_URLS.PRODUCTS}/${item.id}`);
-                const currentProduct = productResponse.data;
-                const restoredStock = (currentProduct.stock || 0) + item.quantity;
-                
-                await axios.put(`${API_URLS.PRODUCTS}/${item.id}`, {
+                const productId =
+                  item.product?._id ||
+                  item.product ||
+                  item.productId ||
+                  item.id ||
+                  item._id;
+                const productResponse = await axios.get(
+                  `${API_URLS.PRODUCTS}/${productId}`
+                );
+                const currentProduct =
+                  productResponse.data.product || productResponse.data;
+                const newStock = Math.max(
+                  0,
+                  (currentProduct.stock || 0) - item.quantity
+                );
+
+                await axios.put(`${API_URLS.PRODUCTS}/${productId}`, {
                   ...currentProduct,
-                  stock: restoredStock
+                  stock: newStock,
                 });
               } catch (error) {
-                console.error(`Error restoring stock for product ${item.id}:`, error);
+                console.error(`Error reducing stock for product:`, error);
               }
             }) || [];
 
-            await Promise.all(stockRestorePromises);
+          await Promise.all(stockUpdatePromises);
+
+          // Update order status (use helper that falls back PUT -> PATCH if necessary)
+          try {
+            await updateOrderStatus(orderId, { status: currentOrder.status });
+            setOrders(
+              orders.map((o) =>
+                (o._id || o.id) === orderId
+                  ? { ...o, status: currentOrder.status }
+                  : o
+              )
+            );
+          } catch (err) {
+            // If server reports insufficient stock, show actionable message
+            const serverMsg =
+              err.response?.data?.message ||
+              err.message ||
+              "Failed to update order";
+            if (
+              err.response?.status === 400 &&
+              /Insufficient stock/i.test(serverMsg)
+            ) {
+              const go = window.confirm(
+                serverMsg +
+                  "\n\nWould you like to open Products admin to restock or edit the order?"
+              );
+              if (go) {
+                // Navigate to admin products page so admin can restock
+                window.location.href = "/admin/dashboard/products";
+                return;
+              }
+              // otherwise keep modal open for manual action
+              return;
+            }
+            throw err;
           }
-          
-          // Delete the order
-          await axios.delete(`${API_URL}/${currentOrder.id}`);
-          setOrders(orders.filter(o => o.id !== currentOrder.id));
           setIsModalOpen(false);
-          
-          const successMessage = wasDelivered 
-            ? "Order cancelled, stock restored, and order deleted successfully"
-            : "Order cancelled and deleted successfully";
-          alert(successMessage);
+          alert("Order set to Pending and stock reduced successfully");
+        }
+      } else if (currentOrder.status === "cancelled") {
+        // Restore stock (if needed) and delete order
+        const wasPending = originalOrder && originalOrder.status === "pending";
+
+        const confirmMessage = wasPending
+          ? "This order was Pending. Cancelling will restore stock and delete the order. Continue?"
+          : "Cancelling this order will delete it. Continue?";
+
+        if (window.confirm(confirmMessage)) {
+          // Call DELETE /api/orders/:id to remove the order and restore stock server-side
+          try {
+            await axios.delete(`${API_URL}/${orderId}`);
+            setOrders(orders.filter((o) => (o._id || o.id) !== orderId));
+            setIsModalOpen(false);
+            alert("Order deleted successfully");
+          } catch (err) {
+            console.error("Error deleting order:", err.response || err);
+            alert(
+              "Failed to delete order: " +
+                (err.response?.data?.message || err.message)
+            );
+          }
         }
       } else {
-        // Update order status for Pending
-        await axios.put(`${API_URL}/${currentOrder.id}`, currentOrder);
-        setOrders(orders.map(o => o.id === currentOrder.id ? currentOrder : o));
+        // Update order status for other statuses (delivered, etc.)
+        await updateOrderStatus(orderId, { status: currentOrder.status });
+        setOrders(
+          orders.map((o) =>
+            (o._id || o.id) === orderId
+              ? { ...o, status: currentOrder.status }
+              : o
+          )
+        );
         setIsModalOpen(false);
         alert("Order updated successfully");
       }
     } catch (error) {
-      console.error("Error updating order:", error);
-      alert("Failed to update order");
+      console.error(
+        "Error updating order:",
+        error.response?.data || error.message || error
+      );
+      alert(
+        "Failed to update order: " +
+          (error.response?.data?.message || error.message || "See console")
+      );
     }
+  };
+
+  // Helper: Try PUT then PATCH if backend doesn't support PUT for updating orders
+  const updateOrderStatus = async (orderId, payload) => {
+    // Backend defines status update route as PUT /api/orders/:id/status
+    const statusUrl = `${API_URL}/${orderId}/status`;
+    try {
+      return await axios.put(statusUrl, payload);
+    } catch (err) {
+      // If PUT returns 404 try PATCH on the same path as a last resort
+      if (err.response && err.response.status === 404) {
+        try {
+          return await axios.patch(statusUrl, payload);
+        } catch (patchErr) {
+          throw patchErr;
+        }
+      }
+      throw err;
+    }
+  };
+
+  // Helper: normalize order items from different backend shapes
+  const getOrderItems = (order) => {
+    if (!order) return [];
+    // Common shapes: order.items, order.orderItems, order.cart?.items
+    if (Array.isArray(order.items) && order.items.length) return order.items;
+    if (Array.isArray(order.orderItems) && order.orderItems.length)
+      return order.orderItems;
+    if (
+      order.cart &&
+      Array.isArray(order.cart.items) &&
+      order.cart.items.length
+    )
+      return order.cart.items;
+    // fallback: try order.products or order.itemsMap
+    if (Array.isArray(order.products)) return order.products;
+    return [];
   };
 
   if (loading) {
@@ -145,7 +264,7 @@ const Orders = () => {
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-gray-50 text-gray-600 text-sm uppercase tracking-wider">
-              <th className="p-4 border-b">Order ID</th>
+              <th className="p-4 border-b">Order #</th>
               <th className="p-4 border-b">Customer</th>
               <th className="p-4 border-b">Date</th>
               <th className="p-4 border-b">Total</th>
@@ -154,31 +273,44 @@ const Orders = () => {
             </tr>
           </thead>
           <tbody className="text-gray-700 text-sm">
-            {orders.map((order) => (
-              <tr key={order.id} className="hover:bg-gray-50 transition-colors">
-                <td className="p-4 border-b font-medium">{order.id}</td>
-                <td className="p-4 border-b">{order.customer || "Guest"}</td>
-                <td className="p-4 border-b">{order.date || new Date().toLocaleDateString()}</td>
-                <td className="p-4 border-b">${(order.total || 0).toFixed(2)}</td>
+            {orders.map((order, index) => (
+              <tr
+                key={order._id || order.id}
+                className="hover:bg-gray-50 transition-colors"
+              >
+                <td className="p-4 border-b font-medium">#{index + 1}</td>
+                <td className="p-4 border-b">
+                  {order.customer || order.user?.name || "Guest"}
+                </td>
+                <td className="p-4 border-b">
+                  {order.date ||
+                    new Date(
+                      order.createdAt || Date.now()
+                    ).toLocaleDateString()}
+                </td>
+                <td className="p-4 border-b">
+                  ${(order.total || order.totalAmount || 0).toFixed(2)}
+                </td>
                 <td className="p-4 border-b">
                   <span
                     className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                      order.status === "Delivered"
+                      order.status === "delivered"
                         ? "bg-green-100 text-green-700"
-                        : order.status === "Pending"
+                        : order.status === "pending"
                         ? "bg-yellow-100 text-yellow-700"
-                        : order.status === "Cancelled"
+                        : order.status === "cancelled"
                         ? "bg-red-100 text-red-700"
                         : "bg-gray-100 text-gray-700"
                     }`}
                   >
-                    {order.status || "Pending"}
+                    {order.status || "pending"}
                   </span>
                 </td>
                 <td className="p-4 border-b text-right">
-                  <button 
-                    onClick={() => handleView(order)}
+                  <button
+                    onClick={() => handleView(order, index)}
                     className="text-blue-500 hover:text-blue-700 p-1"
+                    title="View Details"
                   >
                     <FaEye />
                   </button>
@@ -192,9 +324,11 @@ const Orders = () => {
       {/* Order Details Modal */}
       {isModalOpen && currentOrder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold">Order Details</h3>
+              <h3 className="text-lg font-bold">
+                Order #{orderNumber} Details
+              </h3>
               <button
                 onClick={() => setIsModalOpen(false)}
                 className="text-gray-500 hover:text-gray-700"
@@ -202,49 +336,130 @@ const Orders = () => {
                 <FaTimes />
               </button>
             </div>
-            
+
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Order ID</label>
-                  <p className="mt-1 text-gray-900">{currentOrder.id}</p>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Order Number
+                  </label>
+                  <p className="mt-1 text-gray-900">#{orderNumber}</p>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Date</label>
-                  <p className="mt-1 text-gray-900">{currentOrder.date}</p>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Date
+                  </label>
+                  <p className="mt-1 text-gray-900">
+                    {currentOrder.date ||
+                      new Date(
+                        currentOrder.createdAt || Date.now()
+                      ).toLocaleDateString()}
+                  </p>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Customer</label>
-                  <p className="mt-1 text-gray-900">{currentOrder.customer}</p>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Customer
+                  </label>
+                  <p className="mt-1 text-gray-900">
+                    {currentOrder.customer ||
+                      currentOrder.user?.name ||
+                      "Guest"}
+                  </p>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Total</label>
-                  <p className="mt-1 text-gray-900">${currentOrder.total}</p>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Total
+                  </label>
+                  <p className="mt-1 text-gray-900">
+                    $
+                    {(
+                      currentOrder.total ||
+                      currentOrder.totalAmount ||
+                      0
+                    ).toFixed(2)}
+                  </p>
                 </div>
               </div>
-
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Status
+                </label>
                 <select
                   value={currentOrder.status}
                   onChange={handleStatusChange}
                   className="w-full border rounded-md p-2"
                 >
-                  <option value="Pending">Pending</option>
-                  <option value="Delivered">Delivered</option>
-                  <option value="Cancelled">Cancelled</option>
+                  <option value="pending">Pending</option>
+                  <option value="delivered">Delivered</option>
+                  <option value="cancelled">Cancelled</option>
                 </select>
               </div>
 
+              {/* Shipping Address */}
+              {currentOrder.address && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Shipping Address
+                  </label>
+                  <div className="bg-gray-50 rounded-md p-4">
+                    <p className="text-sm text-gray-900">
+                      {currentOrder.address.street || "-"}
+                    </p>
+                    <p className="text-sm text-gray-700">
+                      {currentOrder.address.city || ""},{" "}
+                      {currentOrder.address.state || ""}{" "}
+                      {currentOrder.address.zip || ""}
+                    </p>
+                    <p className="text-sm text-gray-700">
+                      {currentOrder.address.country || ""}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Items</label>
-                <div className="bg-gray-50 rounded-md p-4 space-y-2">
-                  {currentOrder.items && currentOrder.items.map((item, index) => (
-                    <div key={index} className="flex justify-between text-sm">
-                      <span>{item.name} (x{item.quantity})</span>
-                      <span>${(item.price * item.quantity).toFixed(2)}</span>
-                    </div>
-                  ))}
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Items
+                </label>
+                <div className="bg-gray-50 rounded-md p-4 space-y-3">
+                  {getOrderItems(currentOrder).map((item, index) => {
+                    const name =
+                      item.name ||
+                      item.product?.name ||
+                      item.productName ||
+                      "Product";
+                    const qty = item.quantity || item.qty || item.count || 1;
+                    const imageSrc =
+                      item.image || item.product?.image || item.productImage;
+                    const unitPrice =
+                      item.price ?? item.unitPrice ?? item.product?.price ?? 0;
+                    const lineTotal = unitPrice * qty;
+                    return (
+                      <div
+                        key={index}
+                        className="flex items-center justify-between border-b pb-2 last:border-b-0"
+                      >
+                        <div className="flex items-center gap-3">
+                          {imageSrc && (
+                            <img
+                              src={imageSrc}
+                              alt={name}
+                              className="w-12 h-12 object-cover rounded"
+                            />
+                          )}
+                          <div>
+                            <p className="font-medium text-sm">{name}</p>
+                            <p className="text-xs text-gray-500">
+                              Quantity: {qty}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="font-semibold">
+                          ${lineTotal.toFixed(2)}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -258,15 +473,20 @@ const Orders = () => {
                 <button
                   onClick={handleSave}
                   className={`px-4 py-2 rounded ${
-                    currentOrder.status === "Delivered"
+                    currentOrder.status === "pending"
+                      ? "bg-yellow-600 hover:bg-yellow-700"
+                      : currentOrder.status === "delivered"
                       ? "bg-green-600 hover:bg-green-700"
-                      : currentOrder.status === "Cancelled"
+                      : currentOrder.status === "cancelled"
                       ? "bg-red-600 hover:bg-red-700"
                       : "bg-blue-600 hover:bg-blue-700"
                   } text-white`}
                 >
-                  {currentOrder.status === "Delivered" ? "Deliver & Reduce Stock" : 
-                   currentOrder.status === "Cancelled" ? "Cancel Order" : "Save Changes"}
+                  {currentOrder.status === "pending"
+                    ? "Set Pending & Reduce Stock"
+                    : currentOrder.status === "cancelled"
+                    ? "Cancel Order"
+                    : "Save Changes"}
                 </button>
               </div>
             </div>

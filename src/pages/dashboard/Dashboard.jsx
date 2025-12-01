@@ -9,8 +9,6 @@ import {
   FaChartPie,
   FaBars,
   FaTimes,
-  FaShoppingBag,
-  FaShoppingCart,
 } from "react-icons/fa";
 
 const Dashboard = () => {
@@ -29,8 +27,6 @@ const Dashboard = () => {
     { path: "/admin/dashboard/users", label: "Users", icon: <FaUsers /> },
     { path: "/admin/dashboard/products", label: "Products", icon: <FaBoxOpen /> },
     { path: "/admin/dashboard/orders", label: "Orders", icon: <FaClipboardList /> },
-    { path: "/admin/dashboard/ordered-items", label: "Ordered Items", icon: <FaShoppingBag /> },
-    { path: "/admin/dashboard/carts", label: "Carts", icon: <FaShoppingCart /> },
   ];
 
   return (

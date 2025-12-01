@@ -1,19 +1,10 @@
 import { useState, useContext } from "react";
 import axios from "axios";
 import { AuthContext } from "../App";
-import {
-  Button,
-  IconButton,
-  Typography
-} from "@material-tailwind/react";
+import { Button, IconButton, Typography } from "@material-tailwind/react";
 import { API_URLS } from "../api/config";
 
-import {
-  IoBagOutline,
-  IoAdd,
-  IoRemove,
-  IoClose
-} from "react-icons/io5";
+import { IoBagOutline, IoAdd, IoRemove, IoClose } from "react-icons/io5";
 
 // Separator component
 function MTSeparator() {
@@ -39,10 +30,7 @@ function MTDrawer({ open, onClose, title, children }) {
   return (
     <>
       {open && (
-        <div
-          className="fixed inset-0 bg-black/40 z-40"
-          onClick={onClose}
-        />
+        <div className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
       )}
 
       <div
@@ -62,17 +50,25 @@ function MTDrawer({ open, onClose, title, children }) {
         </div>
 
         {/* Content */}
-        <div className="p-4 h-[calc(100%-64px)] overflow-auto">
-          {children}
-        </div>
+        <div className="p-4 h-[calc(100%-64px)] overflow-auto">{children}</div>
       </div>
     </>
   );
 }
 
-const Cart = ({ isOpen, onClose, items, onUpdateQuantity, onRemoveItem, setCartItems }) => {
+const Cart = ({
+  isOpen,
+  onClose,
+  items,
+  onUpdateQuantity,
+  onRemoveItem,
+  setCartItems,
+}) => {
   const { userName, isLoggedIn } = useContext(AuthContext);
-  const subtotal = items.reduce((total, item) => total + item.price * item.quantity, 0);
+  const subtotal = items.reduce(
+    (total, item) => total + item.price * item.quantity,
+    0
+  );
   const tax = subtotal * 0.1; // Assuming 10% tax
   const total = subtotal + tax;
 
@@ -82,16 +78,22 @@ const Cart = ({ isOpen, onClose, items, onUpdateQuantity, onRemoveItem, setCartI
     city: "",
     state: "",
     zip: "",
-    country: ""
+    country: "",
   });
 
   const handleAddressChange = (e) => {
     const { name, value } = e.target;
-    setAddress(prev => ({ ...prev, [name]: value }));
+    setAddress((prev) => ({ ...prev, [name]: value }));
   };
 
   const validateAddress = () => {
-    return address.street && address.city && address.state && address.zip && address.country;
+    return (
+      address.street &&
+      address.city &&
+      address.state &&
+      address.zip &&
+      address.country
+    );
   };
 
   const handleCheckout = async () => {
@@ -111,61 +113,175 @@ const Cart = ({ isOpen, onClose, items, onUpdateQuantity, onRemoveItem, setCartI
     }
 
     try {
+      // helper: fetch product with retries for transient network/server errors
+      const fetchProductWithRetries = async (productId, retries = 2) => {
+        let attempt = 0;
+        while (attempt <= retries) {
+          try {
+            return await axios.get(`${API_URLS.PRODUCTS}/${productId}`);
+          } catch (err) {
+            attempt += 1;
+            if (attempt > retries) throw err;
+            // small backoff
+            await new Promise((r) => setTimeout(r, 300 * attempt));
+          }
+        }
+      };
+
       // Validate stock for all items
       const stockValidation = await Promise.all(
-        items.map(async (item) => {
+        items.map(async (item, idx) => {
+          const productId = item.id || item._id || item.productId;
+          // helper: check for Mongo ObjectId (24 hex chars)
+          const isObjectId = (id) =>
+            typeof id === "string" && /^[0-9a-fA-F]{24}$/.test(id);
+          if (!productId || !isObjectId(productId)) {
+            // Mark invalid id to prevent server 500s
+            return {
+              valid: false,
+              productName: item.name,
+              error: true,
+              invalidId: true,
+            };
+          }
           try {
-            const productResponse = await axios.get(`${API_URLS.PRODUCTS}/${item.id}`);
-            const currentProduct = productResponse.data;
+            const productResponse = await fetchProductWithRetries(productId, 2);
+            const currentProduct =
+              productResponse.data.product || productResponse.data;
             const availableStock = currentProduct.stock || 0;
-            
+
             if (item.quantity > availableStock) {
               return {
                 valid: false,
                 productName: item.name,
                 requested: item.quantity,
-                available: availableStock
+                available: availableStock,
               };
             }
             return { valid: true };
           } catch (error) {
-            console.error(`Error checking stock for product ${item.id}:`, error);
-            return { valid: false, productName: item.name, error: true };
+            console.error(
+              `Error checking stock for product ${productId || "unknown"}:`,
+              error.response || error
+            );
+            // Distinguish server response errors from network/unknown errors
+            const isServerError = !!error.response;
+            return {
+              valid: false,
+              productName: item.name,
+              error: true,
+              serverError: isServerError,
+              status: error.response?.status,
+              productId,
+            };
           }
         })
       );
 
       // Check if any item failed validation
-      const invalidItem = stockValidation.find(v => !v.valid);
+      const invalidItem = stockValidation.find((v) => !v.valid);
       if (invalidItem) {
         if (invalidItem.error) {
-          alert(`Error checking stock for ${invalidItem.productName}. Please try again.`);
+          alert(
+            `Error checking stock for ${invalidItem.productName}. Please try again.`
+          );
         } else {
-          alert(`Cannot checkout: ${invalidItem.productName} has only ${invalidItem.available} items in stock, but you requested ${invalidItem.requested}.`);
+          alert(
+            `Cannot checkout: ${invalidItem.productName} has only ${invalidItem.available} items in stock, but you requested ${invalidItem.requested}.`
+          );
         }
         return;
       }
 
-      // Create order with items details (stock will be reduced when status changes to Delivered)
+      // Create order with items details (backend expects items as [{ productId, quantity }])
+      const payloadItems = items.map((i) => ({
+        productId: i.id || i._id || i.productId,
+        quantity: i.quantity,
+      }));
       const orderData = {
         customer: userName,
-        items: items,
+        items: payloadItems,
         total: total,
-        date: new Date().toISOString().split('T')[0],
-        status: "Pending",
-        address: address // Include address in the payload
+        date: new Date().toISOString().split("T")[0],
+        status: "pending",
+        address: address, // Include address in the payload
       };
 
-      await axios.post(API_URLS.ORDERS, orderData);
-      
+      // Ensure token is included (axios interceptors attempt this, but add explicit header to be safe)
+      const token = (() => {
+        try {
+          return localStorage.getItem("token");
+        } catch {
+          return null;
+        }
+      })();
+
+      if (!token) {
+        alert(
+          "You must be logged in to place an order. Please login and try again."
+        );
+        return;
+      }
+
+      // Get stored user and ensure they have 'client' role required by backend
+      let storedUser = null;
+      try {
+        const raw = localStorage.getItem("user");
+        storedUser = raw ? JSON.parse(raw) : null;
+      } catch (err) {
+        console.warn("Error parsing stored user", err);
+      }
+
+      if (!storedUser || storedUser.role !== "client") {
+        alert(
+          "Only users with role 'client' can place orders. Please login with a client account."
+        );
+        console.debug(
+          "Order blocked: token present?",
+          !!token,
+          "storedUser:",
+          storedUser
+        );
+        return;
+      }
+
+      // Debug info to help diagnose 403s (remove in production)
+      console.debug(
+        "Placing order with token (truncated):",
+        token ? `${token.slice(0, 10)}...` : null,
+        "user:",
+        storedUser
+      );
+
+      // Place the order
+      await axios.post(API_URLS.ORDERS, orderData, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
       alert("Order placed successfully!");
       setCartItems([]);
       setShowAddressForm(false);
       setAddress({ street: "", city: "", state: "", zip: "", country: "" });
       onClose();
     } catch (error) {
-      console.error("Error placing order:", error);
-      alert("Failed to place order. Please try again.");
+      // Show backend message when available and give actionable guidance for 401/403
+      const serverMsg =
+        error.response?.data?.message || error.message || "Unknown error";
+      console.error("Error placing order:", error.response || error);
+
+      if (error.response?.status === 401) {
+        alert("Not authenticated. Please login and try again.");
+        return;
+      }
+
+      if (error.response?.status === 403) {
+        alert(
+          "Forbidden: your account does not have permission to create orders. Make sure you are logged in as a client."
+        );
+        return;
+      }
+
+      alert("Failed to place order: " + serverMsg);
     }
   };
 
@@ -179,7 +295,9 @@ const Cart = ({ isOpen, onClose, items, onUpdateQuantity, onRemoveItem, setCartI
       title={
         <>
           <IoBagOutline className="w-6 h-6" />
-          {showAddressForm ? "Checkout - Shipping Address" : `Shopping Cart (${items.length})`}
+          {showAddressForm
+            ? "Checkout - Shipping Address"
+            : `Shopping Cart (${items.length})`}
         </>
       }
     >
@@ -188,9 +306,7 @@ const Cart = ({ isOpen, onClose, items, onUpdateQuantity, onRemoveItem, setCartI
         <div className="flex-1 flex items-center justify-center flex-col gap-4 py-8">
           <IoBagOutline className="h-16 w-16 text-gray-300" />
 
-          <Typography className="text-gray-500">
-            Your cart is empty
-          </Typography>
+          <Typography className="text-gray-500">Your cart is empty</Typography>
 
           <Button color="blue" onClick={onClose}>
             Continue Shopping
@@ -199,7 +315,9 @@ const Cart = ({ isOpen, onClose, items, onUpdateQuantity, onRemoveItem, setCartI
       ) : showAddressForm ? (
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Street Address *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Street Address *
+            </label>
             <input
               type="text"
               name="street"
@@ -212,7 +330,9 @@ const Cart = ({ isOpen, onClose, items, onUpdateQuantity, onRemoveItem, setCartI
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">City *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                City *
+              </label>
               <input
                 type="text"
                 name="city"
@@ -224,7 +344,9 @@ const Cart = ({ isOpen, onClose, items, onUpdateQuantity, onRemoveItem, setCartI
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">State *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                State *
+              </label>
               <input
                 type="text"
                 name="state"
@@ -238,7 +360,9 @@ const Cart = ({ isOpen, onClose, items, onUpdateQuantity, onRemoveItem, setCartI
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">ZIP Code *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                ZIP Code *
+              </label>
               <input
                 type="text"
                 name="zip"
@@ -250,7 +374,9 @@ const Cart = ({ isOpen, onClose, items, onUpdateQuantity, onRemoveItem, setCartI
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Country *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Country *
+              </label>
               <input
                 type="text"
                 name="country"
@@ -264,89 +390,88 @@ const Cart = ({ isOpen, onClose, items, onUpdateQuantity, onRemoveItem, setCartI
           </div>
 
           <div className="mt-8 space-y-2">
-             <Button
-               fullWidth 
-               color="green"
-               onClick={handleCheckout}>
-                Place Order
-              </Button>
-              <Button
-                fullWidth
-                variant="text"
-                color="blue-gray"
-                onClick={() => setShowAddressForm(false)}
-              >
-                Back to Cart
-              </Button>
+            <Button fullWidth color="green" onClick={handleCheckout}>
+              Place Order
+            </Button>
+            <Button
+              fullWidth
+              variant="text"
+              color="blue-gray"
+              onClick={() => setShowAddressForm(false)}
+            >
+              Back to Cart
+            </Button>
           </div>
         </div>
       ) : (
         <>
           {/* ITEMS */}
           <div className="space-y-4 py-2">
-            {items.map((item) => (
-              <div key={item.id} className="flex gap-3">
-                <MTImage
-                  src={item.image}
-                  alt={item.name}
-                  className="w-16 h-16 object-cover rounded-md"
-                />
+            {items.map((item, idx) => {
+              const productId =
+                item.id || item._id || item.productId || `idx-${idx}`;
+              return (
+                <div key={productId} className="flex gap-3">
+                  <MTImage
+                    src={item.image}
+                    alt={item.name}
+                    className="w-16 h-16 object-cover rounded-md"
+                  />
 
-                <div className="flex-1">
-                  <Typography className="font-medium text-sm line-clamp-2">
+                  <div className="flex-1">
+                    <Typography className="font-medium text-sm line-clamp-2">
                       {item.name}
                     </Typography>
-                  <div className="flex justify-between">
-                    <div>
-                      <Typography className="text-gray-500 text-xs">
-                        {item.category}
-                      </Typography>
-                      
-                      <Typography className="font-bold text-sm mt-1">
-                        ${item.price}
-                      </Typography>
+                    <div className="flex justify-between">
+                      <div>
+                        <Typography className="text-gray-500 text-xs">
+                          {item.category}
+                        </Typography>
+
+                        <Typography className="font-bold text-sm mt-1">
+                          {`$${item.price}`}
+                        </Typography>
+                      </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <IconButton
+                          variant="outlined"
+                          size="sm"
+                          onClick={() =>
+                            onUpdateQuantity(
+                              productId,
+                              Math.max(0, item.quantity - 1)
+                            )
+                          }
+                        >
+                          <IoRemove className="h-4 w-4" />
+                        </IconButton>
+
+                        <Typography className="text-sm w-6 text-center">
+                          {item.quantity}
+                        </Typography>
+
+                        <IconButton
+                          variant="outlined"
+                          size="sm"
+                          onClick={() =>
+                            onUpdateQuantity(productId, item.quantity + 1)
+                          }
+                        >
+                          <IoAdd className="h-4 w-4" />
+                        </IconButton>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2 mt-1">
-                    <IconButton
-                      variant="outlined"
-                      size="sm"
-                      onClick={() =>
-                        onUpdateQuantity(
-                          item.id,
-                          Math.max(0, item.quantity - 1)
-                        )
-                      }
-                    >
-                      <IoRemove className="h-4 w-4" />
-                    </IconButton>
-
-                    <Typography className="text-sm w-6 text-center">
-                      {item.quantity}
-                    </Typography>
-
-                    <IconButton
-                      variant="outlined"
-                      size="sm"
-                      onClick={() =>
-                        onUpdateQuantity(item.id, item.quantity + 1)
-                      }
-                    >
-                      <IoAdd className="h-4 w-4" />
-                    </IconButton>
-                  </div>
                   </div>
 
-                  
+                  <IconButton
+                    variant="text"
+                    onClick={() => onRemoveItem(productId)}
+                  >
+                    <IoClose className="w-5 h-5 text-gray-600" />
+                  </IconButton>
                 </div>
-
-                <IconButton
-                  variant="text"
-                  onClick={() => onRemoveItem(item.id)}
-                >
-                  <IoClose className="w-5 h-5 text-gray-600" />
-                </IconButton>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* SUMMARY */}
@@ -354,28 +479,25 @@ const Cart = ({ isOpen, onClose, items, onUpdateQuantity, onRemoveItem, setCartI
             <div className="space-y-3">
               <div className="flex justify-between text-sm space-y-2">
                 <span>Subtotal</span>
-                <span>${subtotal.toFixed(2)}</span>
+                <span>{`$${subtotal.toFixed(2)}`}</span>
               </div>
 
               <div className="flex justify-between text-sm">
                 <span>Tax</span>
-                <span>${tax.toFixed(2)}</span>
+                <span>{`$${tax.toFixed(2)}`}</span>
               </div>
 
               <MTSeparator />
 
               <div className="flex justify-between font-bold text-base">
                 <span>Total</span>
-                <span>${total.toFixed(2)}</span>
+                <span>{`$${total.toFixed(2)}`}</span>
               </div>
             </div>
 
             {/* BUTTONS */}
             <div className="space-y-2 mt-4">
-              <Button
-               fullWidth 
-               color="green"
-               onClick={handleCheckout}>
+              <Button fullWidth color="green" onClick={handleCheckout}>
                 Checkout
               </Button>
 

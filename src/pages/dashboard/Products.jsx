@@ -8,8 +8,8 @@ const Products = () => {
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  
-    // Default state for a new product
+
+  // Default state for a new product
   const initialProductState = {
     name: "",
     category: "",
@@ -38,7 +38,19 @@ const Products = () => {
     setLoading(true);
     try {
       const res = await axios.get(API_URL);
-      setProducts(res.data);
+      // Normalize response: backend may return an array or an object like { items: [...] }
+      var data = res.data;
+      var items = [];
+      if (Array.isArray(data)) {
+        items = data;
+      } else if (data && data.items) {
+        items = data.items;
+      } else if (data && data.data) {
+        items = data.data;
+      } else if (data && data.products) {
+        items = data.products;
+      }
+      setProducts(items);
     } catch (error) {
       console.error("Error fetching products:", error);
     } finally {
@@ -54,7 +66,9 @@ const Products = () => {
     if (window.confirm("Are you sure you want to delete this product?")) {
       try {
         await axios.delete(`${API_URL}/${id}`);
-        setProducts(products.filter((product) => product.id !== id));
+        setProducts(
+          products.filter((product) => (product.id || product._id) !== id)
+        );
       } catch (error) {
         console.error("Error deleting product:", error);
         alert("Failed to delete product");
@@ -74,6 +88,8 @@ const Products = () => {
     setCurrentProduct({
       ...initialProductState,
       ...product,
+      // ensure there is a canonical id field for editing
+      id: product.id || product._id,
       // Ensure booleans are booleans
       isEcoFriendly: !!product.isEcoFriendly,
       isNew: !!product.isNew,
@@ -95,7 +111,9 @@ const Products = () => {
       if (currentProduct.isNew) tags.push("New");
       if (currentProduct.isEcoFriendly) tags.push("Eco-Friendly");
       if (isSale) {
-        const discount = Math.round(((originalPrice - price) / originalPrice) * 100);
+        const discount = Math.round(
+          ((originalPrice - price) / originalPrice) * 100
+        );
         tags.push(`-${discount}%`);
       }
 
@@ -111,17 +129,51 @@ const Products = () => {
         // Ensure defaults for other fields
         rating: currentProduct.rating || 4,
         reviews: currentProduct.reviews || 0,
-        features: currentProduct.features && currentProduct.features.length > 0 ? currentProduct.features : ["Eco-Friendly", "Sustainable"],
+        features:
+          currentProduct.features && currentProduct.features.length > 0
+            ? currentProduct.features
+            : ["Eco-Friendly", "Sustainable"],
       };
 
       if (isEditing) {
-        await axios.put(`${API_URL}/${currentProduct.id}`, productToSend);
+        const prodId = currentProduct.id || currentProduct._id;
+        if (!prodId) {
+          console.error(
+            "Cannot update product: missing id on currentProduct",
+            currentProduct
+          );
+          alert("Update failed: missing product id");
+          return;
+        }
+        await axios.put(`${API_URL}/${prodId}`, productToSend);
         setProducts(
-          products.map((p) => (p.id === currentProduct.id ? { ...productToSend, id: currentProduct.id } : p))
+          products.map((p) =>
+            (p.id || p._id) === prodId ? { ...productToSend, id: prodId } : p
+          )
         );
       } else {
         const res = await axios.post(API_URL, productToSend);
-        setProducts([...products, res.data]);
+        // Debug: log server response shape so we can adapt to different backends
+        console.debug("POST ", API_URL, " response:", res.data);
+
+        // Normalize possible response shapes from the backend
+        let created = res.data;
+        if (!created) created = {};
+        if (created.product) created = created.product;
+        else if (created.data && !Array.isArray(created.data))
+          created = created.data;
+        else if (created.item) created = created.item;
+        else if (Array.isArray(created) && created.length > 0)
+          created = created[0];
+
+        const newProduct = {
+          ...initialProductState,
+          ...productToSend,
+          ...created,
+          id: created?.id || created?._id || productToSend.id || undefined,
+        };
+
+        setProducts([...products, newProduct]);
       }
       setIsModalOpen(false);
     } catch (error) {
@@ -173,69 +225,75 @@ const Products = () => {
             </tr>
           </thead>
           <tbody className="text-gray-700 text-sm">
-            {products.map((product) => (
-              <tr key={product.id} className="hover:bg-gray-50 transition-colors">
-                <td className="p-4 border-b">
-                  <img
-                    src={product.image}
-                    alt={product.name}
-                    className="w-10 h-10 rounded-full object-cover border"
-                  />
-                </td>
-                <td className="p-4 border-b font-medium">{product.name}</td>
-                <td className="p-4 border-b">
-                  <div className="flex flex-col">
-                    <span>${product.price}</span>
-                    {product.originalPrice > product.price && (
-                      <span className="text-xs text-gray-400 line-through">${product.originalPrice}</span>
-                    )}
-                  </div>
-                </td>
-                <td className="p-4 border-b">
-                  <span className="bg-blue-100 text-blue-800 text-xs font-semibold px-2.5 py-0.5 rounded">
-                    {product.category || "General"}
-                  </span>
-                </td>
-                <td className="p-4 border-b">
-                  <span
-                    className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                      (product.stock || 0) > 5
-                        ? "bg-green-100 text-green-700"
-                        : "bg-red-100 text-red-700"
-                    }`}
-                  >
-                    {product.stock || 0} Units
-                  </span>
-                </td>
-                <td className="p-4 border-b">
-                  <span
-                    className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                      product.inStock
-                        ? "bg-green-100 text-green-700"
-                        : "bg-gray-100 text-gray-700"
-                    }`}
-                  >
-                    {product.inStock ? "Visible" : "Hidden"}
-                  </span>
-                </td>
-                <td className="p-4 border-b text-right">
-                  <div className="flex justify-end gap-2">
-                    <button
-                      onClick={() => handleEdit(product)}
-                      className="text-blue-500 hover:text-blue-700 p-1"
+            {Array.isArray(products) &&
+              products.map((product, idx) => (
+                <tr
+                  key={product.id || product._id || product.name || idx}
+                  className="hover:bg-gray-50 transition-colors"
+                >
+                  <td className="p-4 border-b">
+                    <img
+                      src={product.image}
+                      alt={product.name}
+                      className="w-10 h-10 rounded-full object-cover border"
+                    />
+                  </td>
+                  <td className="p-4 border-b font-medium">{product.name}</td>
+                  <td className="p-4 border-b">
+                    <div className="flex flex-col">
+                      <span>${product.price}</span>
+                      {product.originalPrice > product.price && (
+                        <span className="text-xs text-gray-400 line-through">
+                          ${product.originalPrice}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="p-4 border-b">
+                    <span className="bg-blue-100 text-blue-800 text-xs font-semibold px-2.5 py-0.5 rounded">
+                      {product.category || "General"}
+                    </span>
+                  </td>
+                  <td className="p-4 border-b">
+                    <span
+                      className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                        (product.stock || 0) > 5
+                          ? "bg-green-100 text-green-700"
+                          : "bg-red-100 text-red-700"
+                      }`}
                     >
-                      <FaEdit />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(product.id)}
-                      className="text-red-500 hover:text-red-700 p-1"
+                      {product.stock || 0} Units
+                    </span>
+                  </td>
+                  <td className="p-4 border-b">
+                    <span
+                      className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                        product.inStock
+                          ? "bg-green-100 text-green-700"
+                          : "bg-gray-100 text-gray-700"
+                      }`}
                     >
-                      <FaTrash />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+                      {product.inStock ? "Visible" : "Hidden"}
+                    </span>
+                  </td>
+                  <td className="p-4 border-b text-right">
+                    <div className="flex justify-end gap-2">
+                      <button
+                        onClick={() => handleEdit(product)}
+                        className="text-blue-500 hover:text-blue-700 p-1"
+                      >
+                        <FaEdit />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(product.id || product._id)}
+                        className="text-red-500 hover:text-red-700 p-1"
+                      >
+                        <FaTrash />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
       </div>
@@ -269,7 +327,7 @@ const Products = () => {
                   required
                 />
               </div>
-              
+
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
                   <label className="block text-gray-700 text-sm font-bold mb-2">
@@ -368,7 +426,9 @@ const Products = () => {
                     onChange={handleChange}
                     className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
                   />
-                  <span className="text-gray-700 text-sm font-bold">Visible (In Stock)</span>
+                  <span className="text-gray-700 text-sm font-bold">
+                    Visible (In Stock)
+                  </span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -378,7 +438,9 @@ const Products = () => {
                     onChange={handleChange}
                     className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
                   />
-                  <span className="text-gray-700 text-sm font-bold">Eco-Friendly</span>
+                  <span className="text-gray-700 text-sm font-bold">
+                    Eco-Friendly
+                  </span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -388,7 +450,9 @@ const Products = () => {
                     onChange={handleChange}
                     className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
                   />
-                  <span className="text-gray-700 text-sm font-bold">New Arrival</span>
+                  <span className="text-gray-700 text-sm font-bold">
+                    New Arrival
+                  </span>
                 </label>
               </div>
 

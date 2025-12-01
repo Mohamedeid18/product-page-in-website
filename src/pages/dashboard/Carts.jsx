@@ -14,7 +14,12 @@ const Carts = () => {
     try {
       // Read from ORDERS API
       const res = await axios.get(API_URLS.ORDERS);
-      setCarts(res.data);
+      // Normalize response: backend returns { orders: [...] }
+      const data = res.data;
+      const ordersArray = Array.isArray(data) 
+        ? data 
+        : data.orders || data.items || data.data || [];
+      setCarts(ordersArray);
     } catch (error) {
       console.error("Error fetching carts:", error);
     } finally {

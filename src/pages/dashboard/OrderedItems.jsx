@@ -13,18 +13,22 @@ const OrderedItems = () => {
     setLoading(true);
     try {
       const res = await axios.get(ORDERS_URL);
-      const orders = res.data;
+      // Normalize response: backend returns { orders: [...] }
+      const data = res.data;
+      const ordersArray = Array.isArray(data) 
+        ? data 
+        : data.orders || data.items || data.data || [];
       
       // Extract all items from all orders
       const allItems = [];
-      orders.forEach(order => {
+      ordersArray.forEach(order => {
         if (order.items && Array.isArray(order.items)) {
           order.items.forEach(item => {
             allItems.push({
               ...item,
-              orderId: order.id,
-              customer: order.customer,
-              orderDate: order.date,
+              orderId: order._id || order.id,
+              customer: order.customer || order.user?.name || "Guest",
+              orderDate: order.date || new Date(order.createdAt || Date.now()).toLocaleDateString(),
               orderStatus: order.status
             });
           });
