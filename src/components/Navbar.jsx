@@ -37,7 +37,7 @@ const ProfileMenu = ({ handleLogout, userName }) => {
 
   const profileMenuItems = [];
   profileMenuItems.push({ label: userName || "Profile", icon: FaUserCircle });
-  if (role !== "admin") {
+  if ( role !== "admin") {
     profileMenuItems.push({
       label: "My Orders",
       icon: IoCartOutline,

@@ -1,4 +1,5 @@
 import { useState, useContext } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { AuthContext } from "../App";
 import { Button, IconButton, Typography } from "@material-tailwind/react";
@@ -65,6 +66,7 @@ const Cart = ({
   setCartItems,
 }) => {
   const { userName, isLoggedIn } = useContext(AuthContext);
+  const navigate = useNavigate();
   const subtotal = items.reduce(
     (total, item) => total + item.price * item.quantity,
     0
@@ -263,6 +265,8 @@ const Cart = ({
       setShowAddressForm(false);
       setAddress({ street: "", city: "", state: "", zip: "", country: "" });
       onClose();
+      // Navigate to My Orders so user can see their order
+      navigate("/my-orders");
     } catch (error) {
       // Show backend message when available and give actionable guidance for 401/403
       const serverMsg =
@@ -282,6 +286,32 @@ const Cart = ({
       }
 
       alert("Failed to place order: " + serverMsg);
+    }
+  };
+
+  // Helper wrappers to handle navigation when cart becomes empty
+  const handleRemoveItem = (productId) => {
+    const willBeEmpty = items.length <= 1;
+    onRemoveItem(productId);
+    if (willBeEmpty) {
+      onClose();
+      navigate("/");
+      setTimeout(() => window.location.reload(), 120);
+    }
+  };
+
+  const handleUpdateQuantity = (productId, qty) => {
+    const willBeRemoval = qty <= 0;
+    const willBeEmpty = willBeRemoval && items.length <= 1;
+    if (willBeRemoval) {
+      onRemoveItem(productId);
+      if (willBeEmpty) {
+        onClose();
+        navigate("/");
+        setTimeout(() => window.location.reload(), 120);
+      }
+    } else {
+      onUpdateQuantity(productId, qty);
     }
   };
 
@@ -437,7 +467,7 @@ const Cart = ({
                           variant="outlined"
                           size="sm"
                           onClick={() =>
-                            onUpdateQuantity(
+                            handleUpdateQuantity(
                               productId,
                               Math.max(0, item.quantity - 1)
                             )
@@ -454,7 +484,7 @@ const Cart = ({
                           variant="outlined"
                           size="sm"
                           onClick={() =>
-                            onUpdateQuantity(productId, item.quantity + 1)
+                            handleUpdateQuantity(productId, item.quantity + 1)
                           }
                         >
                           <IoAdd className="h-4 w-4" />
@@ -465,7 +495,7 @@ const Cart = ({
 
                   <IconButton
                     variant="text"
-                    onClick={() => onRemoveItem(productId)}
+                    onClick={() => handleRemoveItem(productId)}
                   >
                     <IoClose className="w-5 h-5 text-gray-600" />
                   </IconButton>
